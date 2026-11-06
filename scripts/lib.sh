@@ -28,19 +28,20 @@ output() {
 	printf '%s<<%s\n%s\n%s\n' "$name" "$delim" "$value" "$delim" >>"$GITHUB_OUTPUT"
 }
 
-# Prints a GitHub OIDC token for ship. A token lives for minutes, so each
-# request to ship gets a new one.
-oidc_token() {
+# Sets oidc_token to a GitHub OIDC token for ship. A token lives for minutes,
+# so each request to ship gets a new one. It sets a variable and prints
+# nothing: mask writes a workflow command to stdout, which a command
+# substitution would capture into the token.
+fetch_oidc_token() {
 	if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
 		fail "no GitHub OIDC token is available. Give the job the 'id-token: write' permission. Pull requests from forks do not get OIDC tokens."
 	fi
-	local response token
+	local response
 	response=$(curl --silent --show-error --fail --retry 3 \
 		-H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
 		"${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=ngrok-ship") ||
 		fail "could not get a GitHub OIDC token"
-	token=$(jq -r '.value // empty' <<<"$response")
-	[[ -n "$token" ]] || fail "GitHub returned no OIDC token"
-	mask "$token"
-	printf '%s' "$token"
+	oidc_token=$(jq -r '.value // empty' <<<"$response")
+	[[ -n "$oidc_token" ]] || fail "GitHub returned no OIDC token"
+	mask "$oidc_token"
 }

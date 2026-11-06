@@ -13,7 +13,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-oidc_token=$(oidc_token)
+fetch_oidc_token
 
 request=$(jq -cn --arg app_id "$NGROK_APP_ID" --arg version "$NGROK_ACTION_VERSION" \
 	--arg sha "$NGROK_COMMIT_SHA" --arg image "$NGROK_IMAGE" \

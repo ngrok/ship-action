@@ -14,7 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 [[ -n "${NGROK_APP_ID:-}" ]] || fail "the app-id input is required"
 
-oidc_token=$(oidc_token)
+fetch_oidc_token
 
 request=$(jq -cn --arg app_id "$NGROK_APP_ID" --arg version "$NGROK_ACTION_VERSION" \
 	'{app_id: $app_id, action_version: $version}')
