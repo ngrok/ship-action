@@ -1,0 +1,166 @@
+name: "ngrok ship"
+description: "Build an ngrok ship app's container image and push it to the app's registry."
+author: "ngrok"
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  app-id:
+    description: "The ship app to build, such as app_2abc..."
+    required: true
+  api-url:
+    description: "The ngrok ship base URL. Change it only to test against a non-production ship."
+    required: false
+    default: "https://compute.ngrok.com"
+  context:
+    description: "The build root, relative to the repository. The default is the build root in the app's settings."
+    required: false
+    default: ""
+
+outputs:
+  image:
+    description: "The pushed image reference."
+    value: ${{ steps.config.outputs.image }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: config
+      name: "Fetch build config"
+      shell: bash
+      env:
+        NGROK_APP_ID: ${{ inputs.app-id }}
+        NGROK_API_URL: ${{ inputs.api-url }}
+        NGROK_CONTEXT: ${{ inputs.context }}
+        # On a pull_request run, github.sha is GitHub's merge of the PR into
+        # its base. Ship maps it back to the PR's head commit.
+        NGROK_COMMIT_SHA: ${{ github.sha }}
+      run: |
+        NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \
+          "${GITHUB_ACTION_PATH}/scripts/fetch-build-config.sh"
+
+    # Log in to a private Docker config, so that the credential is gone when
+    # the action returns and the caller's own logins stay as they were.
+    - name: "Use a private Docker config"
+      shell: bash
+      run: |
+        echo "NGROK_SAVED_DOCKER_CONFIG=${DOCKER_CONFIG:-${HOME}/.docker}" >> "${GITHUB_ENV}"
+        dir="$(mktemp -d "${RUNNER_TEMP}/ngrok-docker-XXXXXX")"
+        echo "NGROK_DOCKER_CONFIG=${dir}" >> "${GITHUB_ENV}"
+        echo "DOCKER_CONFIG=${dir}" >> "${GITHUB_ENV}"
+
+    - name: "Log in to the registry"
+      if: steps.config.outputs.login_kind == 'credential'
+      uses: "docker/login-action@v4"
+      with:
+        registry: ${{ steps.config.outputs.registry }}
+        username: ${{ steps.config.outputs.username }}
+        password: ${{ steps.config.outputs.password }}
+        logout: false
+
+    - name: "Log in to GHCR"
+      if: steps.config.outputs.login_kind == 'github-token'
+      uses: "docker/login-action@v4"
+      with:
+        registry: "ghcr.io"
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+        logout: false
+
+    - name: "Install Railpack"
+      if: steps.config.outputs.provider == 'automatic'
+      shell: bash
+      env:
+        RAILPACK_VERSION: "0.30.0"
+      run: |
+        mkdir -p "${RUNNER_TEMP}/railpack-bin"
+        curl -fsSL https://railpack.com/install.sh | sh -s -- --bin-dir "${RUNNER_TEMP}/railpack-bin"
+        echo "${RUNNER_TEMP}/railpack-bin" >> "${GITHUB_PATH}"
+
+    - name: "Prepare Railpack build"
+      if: steps.config.outputs.provider == 'automatic'
+      shell: bash
+      env:
+        NGROK_ROOT_DIRECTORY: ${{ steps.config.outputs.root }}
+        NGROK_RAILPACK_BUILD_COMMAND: ${{ steps.config.outputs.build_command }}
+        NGROK_RAILPACK_RUN_COMMAND: ${{ steps.config.outputs.run_command }}
+      run: |
+        args=(
+          prepare "${NGROK_ROOT_DIRECTORY}"
+          --plan-out "${RUNNER_TEMP}/railpack-plan.json"
+          --info-out "${RUNNER_TEMP}/railpack-info.json"
+          --error-missing-start
+        )
+        if test -n "${NGROK_RAILPACK_BUILD_COMMAND}"; then
+          args+=(--build-cmd "${NGROK_RAILPACK_BUILD_COMMAND}")
+        fi
+        if test -n "${NGROK_RAILPACK_RUN_COMMAND}"; then
+          args+=(--start-cmd "${NGROK_RAILPACK_RUN_COMMAND}")
+        fi
+        railpack "${args[@]}"
+
+    - name: "Set up Buildx"
+      if: steps.config.outputs.provider == 'automatic'
+      uses: "docker/setup-buildx-action@v4"
+
+    - name: "Build and push (Railpack)"
+      if: steps.config.outputs.provider == 'automatic'
+      uses: "docker/build-push-action@v7"
+      with:
+        context: ${{ steps.config.outputs.root }}
+        file: "${{ runner.temp }}/railpack-plan.json"
+        push: true
+        tags: ${{ steps.config.outputs.image }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ steps.config.outputs.sha }}
+        build-args: |
+          BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend:v0.30.0
+          cache-key=${{ inputs.app-id }}
+        cache-from: "type=gha,scope=${{ inputs.app-id }}"
+        cache-to: "type=gha,mode=max,scope=${{ inputs.app-id }}"
+
+    - name: "Build and push (Dockerfile)"
+      if: steps.config.outputs.provider == 'dockerfile'
+      uses: "docker/build-push-action@v7"
+      with:
+        context: ${{ steps.config.outputs.root }}
+        file: ${{ steps.config.outputs.dockerfile }}
+        push: true
+        tags: ${{ steps.config.outputs.image }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ steps.config.outputs.sha }}
+        build-args: |
+          COMMIT_SHA=${{ steps.config.outputs.sha }}
+
+    - name: "Check the build provider"
+      if: steps.config.outputs.provider != 'automatic' && steps.config.outputs.provider != 'dockerfile'
+      shell: bash
+      env:
+        NGROK_PROVIDER: ${{ steps.config.outputs.provider }}
+      run: |
+        NGROK_PROVIDER="${NGROK_PROVIDER//$'\n'/ }"
+        echo "::error title=ngrok ship::this version of ngrok/ship-action does not support the build provider '${NGROK_PROVIDER//%/%25}'"
+        exit 1
+
+    - name: "Remove the private Docker config"
+      if: always() && env.NGROK_DOCKER_CONFIG != ''
+      shell: bash
+      run: |
+        rm -rf "${NGROK_DOCKER_CONFIG}"
+        echo "DOCKER_CONFIG=${NGROK_SAVED_DOCKER_CONFIG}" >> "${GITHUB_ENV}"
+        echo "NGROK_DOCKER_CONFIG=" >> "${GITHUB_ENV}"
+
+    # Ship creates releases from reported images only. The report comes
+    # after the push, so ship never deploys an image that is not there.
+    - name: "Report the image to ngrok ship"
+      shell: bash
+      env:
+        NGROK_APP_ID: ${{ inputs.app-id }}
+        NGROK_API_URL: ${{ inputs.api-url }}
+        NGROK_IMAGE: ${{ steps.config.outputs.image }}
+      run: |
+        NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \
+          "${GITHUB_ACTION_PATH}/scripts/report-image.sh"
