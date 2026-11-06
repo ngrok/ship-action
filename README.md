@@ -1,8 +1,8 @@
 # ngrok ship action
 
-Builds an [ngrok ship](https://ngrok.com) app's container image and pushes it
-to the app's registry. Ship deploys the image when the workflow run
-completes.
+Builds an [ngrok ship](https://ngrok.com) app's container image, pushes it
+to the app's registry, and reports it to ship. Ship deploys only the images
+that the action reports.
 
 The action fetches the registry, the credentials, and the build settings from
 ship on each run. A change to the app's settings in the dashboard takes effect

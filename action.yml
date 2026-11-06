@@ -153,18 +153,15 @@ runs:
         echo "DOCKER_CONFIG=${NGROK_SAVED_DOCKER_CONFIG}" >> "${GITHUB_ENV}"
         echo "NGROK_DOCKER_CONFIG=" >> "${GITHUB_ENV}"
 
-    - name: "Write image reference"
+    # Ship creates releases from reported images only. The report comes
+    # after the push, so ship never deploys an image that is not there.
+    - name: "Report the image to ngrok ship"
       shell: bash
       env:
-        NGROK_IMAGE: ${{ steps.config.outputs.image }}
+        NGROK_APP_ID: ${{ inputs.app-id }}
+        NGROK_API_URL: ${{ inputs.api-url }}
         NGROK_COMMIT_SHA: ${{ steps.config.outputs.sha }}
+        NGROK_IMAGE: ${{ steps.config.outputs.image }}
       run: |
-        mkdir -p "${RUNNER_TEMP}/ngrok-ship"
-        jq -cn --arg image "$NGROK_IMAGE" --arg sha "$NGROK_COMMIT_SHA" \
-          '{image: $image, commit_sha: $sha}' > "${RUNNER_TEMP}/ngrok-ship/ngrok-image.json"
-
-    # Ship reads this artifact when the workflow run completes.
-    - uses: "actions/upload-artifact@v7"
-      with:
-        name: "ngrok-compute-image"
-        path: "${{ runner.temp }}/ngrok-ship/ngrok-image.json"
+        NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \
+          "${GITHUB_ACTION_PATH}/scripts/report-image.sh"

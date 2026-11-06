@@ -9,46 +9,12 @@
 #   NGROK_ACTION_VERSION  this action's version
 set -euo pipefail
 
-# Escapes workflow command data the way @actions/core does, so a value with
-# a newline cannot end the command and start another one.
-escape_data() {
-	local s=$1
-	s=${s//'%'/'%25'}
-	s=${s//$'\r'/'%0D'}
-	s=${s//$'\n'/'%0A'}
-	printf '%s' "$s"
-}
-
-fail() {
-	echo "::error title=ngrok ship::$(escape_data "$*")"
-	exit 1
-}
-
-mask() {
-	[[ -z "$1" ]] || echo "::add-mask::$(escape_data "$1")"
-}
-
-# Writes one step output. A random delimiter keeps a value with newlines
-# from ending the output early.
-output() {
-	local name=$1 value=$2 delim
-	delim="ngrok_$(openssl rand -hex 16)"
-	printf '%s<<%s\n%s\n%s\n' "$name" "$delim" "$value" "$delim" >>"$GITHUB_OUTPUT"
-}
+# shellcheck source=scripts/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 [[ -n "${NGROK_APP_ID:-}" ]] || fail "the app-id input is required"
 
-if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
-	fail "no GitHub OIDC token is available. Give the job the 'id-token: write' permission. Pull requests from forks do not get OIDC tokens."
-fi
-
-oidc_response=$(curl --silent --show-error --fail --retry 3 \
-	-H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-	"${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=ngrok-ship") ||
-	fail "could not get a GitHub OIDC token"
-oidc_token=$(jq -r '.value // empty' <<<"$oidc_response")
-[[ -n "$oidc_token" ]] || fail "GitHub returned no OIDC token"
-mask "$oidc_token"
+oidc_token=$(oidc_token)
 
 request=$(jq -cn --arg app_id "$NGROK_APP_ID" --arg version "$NGROK_ACTION_VERSION" \
 	'{app_id: $app_id, action_version: $version}')
