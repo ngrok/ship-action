@@ -16,8 +16,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 fetch_oidc_token
 
+# The commit starts the release, so the build shows in ship while it runs.
 request=$(jq -cn --arg app_id "$NGROK_APP_ID" --arg version "$NGROK_ACTION_VERSION" \
-	'{app_id: $app_id, action_version: $version}')
+	--arg sha "$NGROK_COMMIT_SHA" \
+	'{app_id: $app_id, action_version: $version, commit_sha: $sha}')
 body_file=$(mktemp)
 trap 'rm -f "$body_file"' EXIT
 
