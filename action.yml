@@ -33,9 +33,9 @@ runs:
         NGROK_APP_ID: ${{ inputs.app-id }}
         NGROK_API_URL: ${{ inputs.api-url }}
         NGROK_CONTEXT: ${{ inputs.context }}
-        # github.sha is a test merge commit on a pull_request run. Ship
-        # matches images to the PR's head commit.
-        NGROK_COMMIT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        # On a pull_request run, github.sha is GitHub's merge of the PR into
+        # its base. Ship maps it back to the PR's head commit.
+        NGROK_COMMIT_SHA: ${{ github.sha }}
       run: |
         NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \
           "${GITHUB_ACTION_PATH}/scripts/fetch-build-config.sh"
@@ -160,7 +160,6 @@ runs:
       env:
         NGROK_APP_ID: ${{ inputs.app-id }}
         NGROK_API_URL: ${{ inputs.api-url }}
-        NGROK_COMMIT_SHA: ${{ steps.config.outputs.sha }}
         NGROK_IMAGE: ${{ steps.config.outputs.image }}
       run: |
         NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \

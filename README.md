@@ -29,9 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          # Build the PR's head commit, not GitHub's test merge commit.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ngrok/ship-action@v1
         with:
           app-id: "app_2abc..."
@@ -47,12 +44,12 @@ jobs:
 
 Pull requests from forks get no OIDC token, so the action cannot run for them.
 
-### Check out the commit you build
+### Check out the default ref
 
-For a `pull_request` run, the action tags the image with the PR's head
-commit, and ship deploys it as that commit. The default checkout on a
-`pull_request` run is a test merge commit, so check out the head commit as the
-example shows. The action warns when the checkout and the tag differ.
+The action builds and tags `github.sha`. On a `pull_request` run, that is
+GitHub's merge of the PR into its base, so the preview runs what the merge
+will ship. Ship shows the preview as the PR's head commit. Keep the default
+checkout: the action warns when the checkout and the tag differ.
 
 ### Build only what changed
 
@@ -72,8 +69,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dorny/paths-filter@v3
         id: changes
         with:
@@ -100,8 +95,8 @@ jobs:
 | -- | -- |
 | `image` | The pushed image reference, tagged with the commit SHA. |
 
-The commit SHA is the pull request's head commit for a `pull_request` run,
-and `github.sha` for every other run.
+The commit SHA is `github.sha`. On a `pull_request` run, that is GitHub's
+merge of the PR into its base.
 
 ## Versions
 

@@ -16,10 +16,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 fetch_oidc_token
 
-# The commit starts the release, so the build shows in ship while it runs.
+# Ship reads the commit from the token, and starts its release.
 request=$(jq -cn --arg app_id "$NGROK_APP_ID" --arg version "$NGROK_ACTION_VERSION" \
-	--arg sha "$NGROK_COMMIT_SHA" \
-	'{app_id: $app_id, action_version: $version, commit_sha: $sha}')
+	'{app_id: $app_id, action_version: $version}')
 body_file=$(mktemp)
 trap 'rm -f "$body_file"' EXIT
 
@@ -61,7 +60,7 @@ fi
 
 head=$(git rev-parse HEAD 2>/dev/null || true)
 if [[ -n "$head" && "$head" != "$NGROK_COMMIT_SHA" ]]; then
-	echo "::warning title=ngrok ship::$(escape_data "the checkout is at ${head}, but the image is tagged as ${NGROK_COMMIT_SHA}. For pull_request runs, check out the PR head: actions/checkout with ref: \${{ github.event.pull_request.head.sha }}")"
+	echo "::warning title=ngrok ship::$(escape_data "the checkout is at ${head}, but the image is tagged as ${NGROK_COMMIT_SHA}. Check out the default ref: actions/checkout with no ref input.")"
 fi
 
 output sha "$NGROK_COMMIT_SHA"

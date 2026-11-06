@@ -5,7 +5,6 @@
 # Inputs (environment):
 #   NGROK_APP_ID          the ship app the image is for
 #   NGROK_API_URL         ship base URL
-#   NGROK_COMMIT_SHA      the commit the image is built from
 #   NGROK_IMAGE           the pushed image reference
 #   NGROK_ACTION_VERSION  this action's version
 set -euo pipefail
@@ -16,8 +15,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 fetch_oidc_token
 
 request=$(jq -cn --arg app_id "$NGROK_APP_ID" --arg version "$NGROK_ACTION_VERSION" \
-	--arg sha "$NGROK_COMMIT_SHA" --arg image "$NGROK_IMAGE" \
-	'{app_id: $app_id, action_version: $version, commit_sha: $sha, image: $image}')
+	--arg image "$NGROK_IMAGE" \
+	'{app_id: $app_id, action_version: $version, image: $image}')
 body_file=$(mktemp)
 trap 'rm -f "$body_file"' EXIT
 
