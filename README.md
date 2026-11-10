@@ -159,11 +159,11 @@ build shows in ship before the image is there. A run that stops before the
 action reports the image deploys nothing. This includes a run that
 `concurrency: cancel-in-progress` stops.
 
-Ship follows the runs of the workflow file that it added for the app, and
-marks the release of a cancelled or failed run as failed. Ship does not
-follow a run of another workflow file, such as one matrix workflow for many
-apps. The release of such a run shows as building until a later release
-replaces it.
+Ship follows the run, and marks the release of a cancelled or failed run
+as failed. For the workflow file that ship added for the app, this is
+immediate. For another workflow file, such as one matrix workflow for many
+apps, ship polls the run, and the release can show as building for about 15
+minutes after the run stops.
 
 ## Inputs
 
