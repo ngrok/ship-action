@@ -1,0 +1,187 @@
+name: "ngrok ship"
+description: "Build an ngrok ship app's container image and push it to the app's registry."
+author: "ngrok"
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  app-id:
+    description: "The ship app to build, such as app_2abc..."
+    required: true
+  api-url:
+    description: "The ngrok ship base URL. Change it only to test against a non-production ship."
+    required: false
+    default: "https://compute.ngrok.com"
+  context:
+    description: "The build root, relative to the repository. The default is the build root in the app's settings."
+    required: false
+    default: ""
+  build-args:
+    description: "Build arguments for a Dockerfile build, one NAME=value on each line. The action also sets COMMIT_SHA."
+    required: false
+    default: ""
+  secrets:
+    description: "BuildKit secrets for a Dockerfile build, one id=value on each line. A composite action cannot read the caller's secrets, so pass each one here."
+    required: false
+    default: ""
+  cache:
+    description: "Set to 'false' to turn off the import and export of the GitHub Actions layer cache."
+    required: false
+    default: "true"
+
+outputs:
+  image:
+    description: "The pushed image reference."
+    value: ${{ steps.config.outputs.image }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: config
+      name: "Fetch build config"
+      shell: bash
+      env:
+        NGROK_APP_ID: ${{ inputs.app-id }}
+        NGROK_API_URL: ${{ inputs.api-url }}
+        NGROK_CONTEXT: ${{ inputs.context }}
+        # On a pull_request run, github.sha is GitHub's merge of the PR into
+        # its base. Ship maps it back to the PR's head commit.
+        NGROK_COMMIT_SHA: ${{ github.sha }}
+      run: |
+        NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \
+          "${GITHUB_ACTION_PATH}/scripts/fetch-build-config.sh"
+
+    # The post step of each login logs out when the job ends, so the
+    # credential does not stay on a runner that the next job uses.
+    - name: "Log in to the registry"
+      if: steps.config.outputs.login_kind == 'credential'
+      uses: "docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550" # v4.8.0
+      with:
+        registry: ${{ steps.config.outputs.registry }}
+        username: ${{ steps.config.outputs.username }}
+        password: ${{ steps.config.outputs.password }}
+
+    # Ship returns no login when the app publishes to GHCR with the
+    # workflow's token.
+    - name: "Log in to GHCR"
+      if: steps.config.outputs.login_kind == 'github-token'
+      uses: "docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550" # v4.8.0
+      with:
+        registry: "ghcr.io"
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - id: railpack
+      name: "Install Railpack"
+      if: steps.config.outputs.provider == 'automatic'
+      shell: bash
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/install-railpack.sh"
+
+    - name: "Prepare Railpack build"
+      if: steps.config.outputs.provider == 'automatic'
+      shell: bash
+      env:
+        NGROK_ROOT_DIRECTORY: ${{ steps.config.outputs.root }}
+        NGROK_RAILPACK_BUILD_COMMAND: ${{ steps.config.outputs.build_command }}
+        NGROK_RAILPACK_RUN_COMMAND: ${{ steps.config.outputs.run_command }}
+      run: |
+        args=(
+          prepare "${NGROK_ROOT_DIRECTORY}"
+          --plan-out "${RUNNER_TEMP}/railpack-plan.json"
+          --info-out "${RUNNER_TEMP}/railpack-info.json"
+          --error-missing-start
+        )
+        if test -n "${NGROK_RAILPACK_BUILD_COMMAND}"; then
+          args+=(--build-cmd "${NGROK_RAILPACK_BUILD_COMMAND}")
+        fi
+        if test -n "${NGROK_RAILPACK_RUN_COMMAND}"; then
+          args+=(--start-cmd "${NGROK_RAILPACK_RUN_COMMAND}")
+        fi
+        railpack "${args[@]}"
+
+    - id: builder
+      name: "Find the Buildx builder"
+      shell: bash
+      run: |
+        driver="$(docker buildx inspect 2>/dev/null | awk '$1 == "Driver:" { print $2; exit }' || true)"
+        echo "driver=${driver:-docker}" >> "${GITHUB_OUTPUT}"
+
+    # The docker driver can run neither the Railpack frontend nor the GitHub
+    # Actions cache. A builder that the caller set up has another driver, and
+    # the action uses it as it is.
+    - id: buildx
+      name: "Set up Buildx"
+      if: >-
+        steps.builder.outputs.driver == 'docker' &&
+        (steps.config.outputs.provider == 'automatic' ||
+        (steps.config.outputs.provider == 'dockerfile' && inputs.cache == 'true'))
+      uses: "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069" # v4.4.1
+
+    - name: "Build and push (Railpack)"
+      if: steps.config.outputs.provider == 'automatic'
+      uses: "docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc" # v7.4.0
+      with:
+        context: ${{ steps.config.outputs.root }}
+        file: "${{ runner.temp }}/railpack-plan.json"
+        # Empty when the action set up no builder. The build then uses the
+        # caller's builder. The name also wins over a BUILDX_BUILDER that
+        # the caller set.
+        builder: ${{ steps.buildx.outputs.name }}
+        push: true
+        tags: ${{ steps.config.outputs.image }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ steps.config.outputs.sha }}
+        build-args: |
+          BUILDKIT_SYNTAX=${{ steps.railpack.outputs.frontend }}
+          cache-key=${{ inputs.app-id }}
+        cache-from: ${{ inputs.cache == 'true' && format('type=gha,scope={0}', inputs.app-id) || '' }}
+        cache-to: ${{ inputs.cache == 'true' && format('type=gha,mode=max,scope={0}', inputs.app-id) || '' }}
+
+    - name: "Build and push (Dockerfile)"
+      if: steps.config.outputs.provider == 'dockerfile'
+      uses: "docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc" # v7.4.0
+      with:
+        context: ${{ steps.config.outputs.root }}
+        file: ${{ steps.config.outputs.dockerfile }}
+        # Empty when the action set up no builder. The build then uses the
+        # caller's builder. The name also wins over a BUILDX_BUILDER that
+        # the caller set.
+        builder: ${{ steps.buildx.outputs.name }}
+        push: true
+        tags: ${{ steps.config.outputs.image }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ steps.config.outputs.sha }}
+        # The caller's arguments come last, so that they can replace
+        # COMMIT_SHA.
+        build-args: |
+          COMMIT_SHA=${{ steps.config.outputs.sha }}
+          ${{ inputs.build-args }}
+        secrets: ${{ inputs.secrets }}
+        cache-from: ${{ inputs.cache == 'true' && format('type=gha,scope={0}', inputs.app-id) || '' }}
+        cache-to: ${{ inputs.cache == 'true' && format('type=gha,mode=max,scope={0}', inputs.app-id) || '' }}
+
+    - name: "Check the build provider"
+      if: steps.config.outputs.provider != 'automatic' && steps.config.outputs.provider != 'dockerfile'
+      shell: bash
+      env:
+        NGROK_PROVIDER: ${{ steps.config.outputs.provider }}
+      run: |
+        NGROK_PROVIDER="${NGROK_PROVIDER//$'\n'/ }"
+        echo "::error title=ngrok ship::this version of ngrok/ship-action does not support the build provider '${NGROK_PROVIDER//%/%25}'"
+        exit 1
+
+    # Ship creates releases from reported images only. The report comes
+    # after the push, so ship never deploys an image that is not there.
+    - name: "Report the image to ngrok ship"
+      shell: bash
+      env:
+        NGROK_APP_ID: ${{ inputs.app-id }}
+        NGROK_API_URL: ${{ inputs.api-url }}
+        NGROK_IMAGE: ${{ steps.config.outputs.image }}
+      run: |
+        NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \
+          "${GITHUB_ACTION_PATH}/scripts/report-image.sh"

@@ -1,0 +1,46 @@
+# Runs this checkout of the action against a real ship. The app must be a
+# ship app connected to this repository, with test/fixture as its build root
+# and test/fixture/Dockerfile as its Dockerfile. Run it against staging
+# before a release tag moves.
+name: "E2E"
+
+on:
+  workflow_dispatch:
+    inputs:
+      app-id:
+        description: "The ship app connected to this repository"
+        required: true
+      api-url:
+        description: "The ship base URL"
+        required: true
+        default: "https://compute.ngrok.com"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - id: ship
+        uses: ./
+        with:
+          app-id: ${{ inputs.app-id }}
+          api-url: ${{ inputs.api-url }}
+          build-args: |
+            BASE_TAG=1.37
+          # The value is not secret. It shows that a secret reaches the build.
+          secrets: |
+            E2E_SECRET=fixture
+      - name: "Check the image output"
+        env:
+          IMAGE: ${{ steps.ship.outputs.image }}
+        run: |
+          test -n "$IMAGE"
+          case "$IMAGE" in
+            *":${GITHUB_SHA}") echo "pushed $IMAGE" ;;
+            *) echo "::error::image $IMAGE is not tagged with ${GITHUB_SHA}"; exit 1 ;;
+          esac
