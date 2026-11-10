@@ -52,24 +52,8 @@ runs:
         NGROK_ACTION_VERSION="$(cat "${GITHUB_ACTION_PATH}/VERSION")" \
           "${GITHUB_ACTION_PATH}/scripts/fetch-build-config.sh"
 
-    # Log in to a private Docker config, so that the credential is gone when
-    # the action returns and the caller's own logins stay as they were.
-    # Buildx keeps its builders below the Docker config. BUILDX_CONFIG keeps
-    # them where they were, so a builder that the caller made stays visible
-    # and only the credentials move.
-    - name: "Use a private Docker config"
-      shell: bash
-      run: |
-        saved="${DOCKER_CONFIG:-${HOME}/.docker}"
-        echo "NGROK_SAVED_DOCKER_CONFIG=${saved}" >> "${GITHUB_ENV}"
-        if test -z "${BUILDX_CONFIG:-}"; then
-          echo "BUILDX_CONFIG=${saved}/buildx" >> "${GITHUB_ENV}"
-          echo "NGROK_SET_BUILDX_CONFIG=true" >> "${GITHUB_ENV}"
-        fi
-        dir="$(mktemp -d "${RUNNER_TEMP}/ngrok-docker-XXXXXX")"
-        echo "NGROK_DOCKER_CONFIG=${dir}" >> "${GITHUB_ENV}"
-        echo "DOCKER_CONFIG=${dir}" >> "${GITHUB_ENV}"
-
+    # The post step of each login logs out when the job ends, so the
+    # credential does not stay on a runner that the next job uses.
     - name: "Log in to the registry"
       if: steps.config.outputs.login_kind == 'credential'
       uses: "docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550" # v4.8.0
@@ -77,8 +61,9 @@ runs:
         registry: ${{ steps.config.outputs.registry }}
         username: ${{ steps.config.outputs.username }}
         password: ${{ steps.config.outputs.password }}
-        logout: false
 
+    # Ship returns no login when the app publishes to GHCR with the
+    # workflow's token.
     - name: "Log in to GHCR"
       if: steps.config.outputs.login_kind == 'github-token'
       uses: "docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550" # v4.8.0
@@ -86,7 +71,6 @@ runs:
         registry: "ghcr.io"
         username: ${{ github.actor }}
         password: ${{ github.token }}
-        logout: false
 
     - id: railpack
       name: "Install Railpack"
@@ -189,18 +173,6 @@ runs:
         NGROK_PROVIDER="${NGROK_PROVIDER//$'\n'/ }"
         echo "::error title=ngrok ship::this version of ngrok/ship-action does not support the build provider '${NGROK_PROVIDER//%/%25}'"
         exit 1
-
-    - name: "Remove the private Docker config"
-      if: always() && env.NGROK_DOCKER_CONFIG != ''
-      shell: bash
-      run: |
-        rm -rf "${NGROK_DOCKER_CONFIG}"
-        echo "DOCKER_CONFIG=${NGROK_SAVED_DOCKER_CONFIG}" >> "${GITHUB_ENV}"
-        if test "${NGROK_SET_BUILDX_CONFIG:-}" = "true"; then
-          echo "BUILDX_CONFIG=" >> "${GITHUB_ENV}"
-          echo "NGROK_SET_BUILDX_CONFIG=" >> "${GITHUB_ENV}"
-        fi
-        echo "NGROK_DOCKER_CONFIG=" >> "${GITHUB_ENV}"
 
     # Ship creates releases from reported images only. The report comes
     # after the push, so ship never deploys an image that is not there.

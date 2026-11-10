@@ -44,6 +44,13 @@ jobs:
 
 Pull requests from forks get no OIDC token, so the action cannot run for them.
 
+### Registry logins
+
+The action logs in to the app's registry in the job's Docker config, and logs
+out when the job ends. When ship returns no credential for the registry,
+the action logs in to `ghcr.io` with the workflow's token. If the job logged
+in to the same registry before the action, the action's login replaces it.
+
 ### Check out the default ref
 
 The action builds and tags `github.sha`. On a `pull_request` run, that is
