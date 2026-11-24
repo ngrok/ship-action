@@ -12,10 +12,13 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
       - name: "shellcheck"
         run: shellcheck scripts/*.sh
       - name: "actionlint"
-        uses: docker://rhysd/actionlint:1.7.7
-        with:
-          args: -color
+        # actionlint does not know the lockfile's "$/" local-action syntax yet,
+        # so that one message is ignored.
+        run: >-
+          docker run --rm -v "${GITHUB_WORKSPACE}:/repo" --workdir /repo
+          rhysd/actionlint:1.7.7 -color -verbose
+          -ignore 'specifying action "\$/" in invalid format'
